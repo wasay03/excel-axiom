@@ -97,6 +97,27 @@ def _values_equal(a, b, *,
 	return a == b
 
 
+def apply_search_filter(df: pd.DataFrame, search_term: str, case_sensitive: bool = False) -> pd.DataFrame:
+	"""
+	Filter dataframe rows that contain the search term in any column.
+	"""
+	if not search_term.strip():
+		return df
+	
+	search_term = search_term if case_sensitive else search_term.lower()
+	mask = pd.Series([False] * len(df), index=df.index)
+	
+	for column in df.columns:
+		# Convert column values to string and handle NaN values
+		col_str = df[column].astype(str).fillna('')
+		if not case_sensitive:
+			col_str = col_str.str.lower()
+		
+		# Check if search term is contained in any cell of this column
+		mask = mask | col_str.str.contains(search_term, na=False, regex=False)
+	
+	return df[mask]
+
 
 def main() -> None:
 
@@ -122,6 +143,10 @@ def main() -> None:
 	# Initialize session state
 	if "filters" not in st.session_state:
 		st.session_state["filters"] = {}
+	if "search_term" not in st.session_state:
+		st.session_state["search_term"] = ""
+	if "case_sensitive" not in st.session_state:
+		st.session_state["case_sensitive"] = False
 	if "base_df" not in st.session_state:
 		st.session_state["base_df"] = df.copy()
 		st.session_state["working_df"] = df.copy()
@@ -133,11 +158,35 @@ def main() -> None:
 			st.session_state["base_df"] = df.copy()
 			st.session_state["working_df"] = df.copy()
 			st.session_state["filters"] = {}
+			st.session_state["search_term"] = ""
+			st.session_state["case_sensitive"] = False
 			st.session_state["last_upload_name"] = current_name
 
 	working_df = st.session_state["working_df"]
 
 	st.success(f"Loaded primary file with {len(working_df):,} rows and {len(working_df.columns):,} columns.")
+
+	# Search Section
+	st.markdown("---")
+	st.subheader("Search Across All Columns")
+	col_search, col_case = st.columns([3, 1])
+	with col_search:
+		search_term = st.text_input(
+			"Search term", 
+			value=st.session_state["search_term"],
+			placeholder="Enter text to search across all columns...",
+			help="This will search for the term in any column and show matching rows"
+		)
+		st.session_state["search_term"] = search_term
+	
+	with col_case:
+		st.write("")  # Add some spacing
+		case_sensitive = st.checkbox(
+			"Case sensitive", 
+			value=st.session_state["case_sensitive"],
+			help="Check to make the search case-sensitive"
+		)
+		st.session_state["case_sensitive"] = case_sensitive
 
 	# New Column Section (placed before filters so new columns are reflected immediately)
 	st.markdown("---")
@@ -230,8 +279,11 @@ def main() -> None:
 			normalized[c] = [v for v in prev if v in available] or available
 		st.session_state["filters"] = normalized
 
-	# Apply filters
-	filtered_df = working_df.copy()
+	# Apply search filter first
+	search_filtered_df = apply_search_filter(working_df, search_term, case_sensitive)
+	
+	# Then apply column filters
+	filtered_df = search_filtered_df.copy()
 	for column_name, selected_values in st.session_state["filters"].items():
 		if selected_values is None:
 			continue
@@ -241,6 +293,12 @@ def main() -> None:
 		filtered_df = filtered_df[filtered_df[column_name].isin(selected_values)]
 
 	st.subheader("Filtered Data")
+	
+	# Show search results info
+	if search_term.strip():
+		search_results_count = len(search_filtered_df)
+		st.info(f"Search found {search_results_count:,} rows containing '{search_term}'")
+	
 	st.dataframe(filtered_df, use_container_width=True)
 	st.caption(f"Rows: {len(filtered_df):,} | Columns: {len(filtered_df.columns):,}")
 
@@ -270,5 +328,3 @@ def main() -> None:
 
 if __name__ == "__main__":
 	main()
-
-
